@@ -1,0 +1,15 @@
+--- #YAML:1.0
+name:                Astro-SpaceElevator
+version:             0.01
+abstract:            Model a Space Elevator
+license:             perl
+generated_by:        ExtUtils::MakeMaker version 6.31
+distribution_type:   module
+requires:     
+    Astro::Coord::ECI:             0
+    Math::MatrixReal:              0
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.2.html
+    version: 1.2
+author:
+    - Daniel Brooks <db48x@yahoo.com>
