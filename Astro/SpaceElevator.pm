@@ -24,7 +24,7 @@ Version 0.01
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 
@@ -32,6 +32,16 @@ our $VERSION = '0.01';
 
     my $elevator = Astro::SpaceElevator->new(0, 120, 100_000, time());
     print "The elevator leaves the Earth's shadow at " . ($elevator->shadows())[1] . "km above the base.\n";
+
+=head1 METHODS
+
+=head2 new
+
+=over
+
+Creates a new elevator object. Takes four arguments: the latitude, longitude and height (in km) of the elevator, and a time in seconds since the epoch, in the GMT timezone.
+
+=back
 
 =cut
 
@@ -50,6 +60,16 @@ sub new
 
     return $self;
 }
+
+=head2 time
+
+=over
+
+Gets the time associated with the model. If you supply an argument, it uses that as a new time to update all of the time-dependant aspects of the model.
+
+=back
+
+=cut
 
 sub time
 {
@@ -91,23 +111,15 @@ sub _vector
     return Math::MatrixReal->new_from_cols([[$x, $y, $z]]);
 }
 
-sub _min
+sub _between
 {
-    my ($a, $b) = @_;
-    return $a < $b ? $a : $b;
+    my ($a, $x, $b) = @_;
+    return $a if ($x < $a);
+    return $x if ($a <= $x and $x <= $b);
+    return $b if ($b < $x);
 }
 
 my $I = Math::MatrixReal->new_diag([1, 1, 1]);
-
-=head1 METHODS
-
-=head2 new
-
-=over
-
-Creates a new elevator object. Takes four arguments: the latitude, longitude and height (in km) of the elevator, and a time in seconds since the epoch, in the GMT timezone.
-
-=back
 
 =head2 shadows
 
@@ -152,8 +164,8 @@ sub shadows
         my @umbra = _intersect($umbraV, $umbraA, $umbraΘ, $baseV, $direction);
         my @penumbra = _intersect(-$umbraV, -$umbraA, $umbraΘ, $baseV, $direction);
 
-        return (_min($umbra[-1], $height),
-                _min($penumbra[-1], $height));
+        return (_between(0, $umbra[-1], $height),
+                _between(0, $penumbra[-1], $height));
     }
     else
     {

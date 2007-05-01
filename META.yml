@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Astro-SpaceElevator
-version:             0.01
+version:             0.02
 abstract:            Model a Space Elevator
 license:             perl
 generated_by:        ExtUtils::MakeMaker version 6.31
