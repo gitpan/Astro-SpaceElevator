@@ -8,5 +8,5 @@ WriteMakefile(NAME         => 'Astro::SpaceElevator',
               dist         => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
               PREREQ_PM    => {
                   'Astro::Coord::ECI' => 0,
-                  'Math::MatrixReal'  => 0,
+                  'Math::MatrixReal'  => 2.02,
               },);

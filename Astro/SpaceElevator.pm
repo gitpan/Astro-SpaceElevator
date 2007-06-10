@@ -12,7 +12,7 @@ use Astro::Coord::ECI::Utils qw{PI rad2deg deg2rad};
 
 # this module lets me do vector and matrix math at a high level, which
 # makes the code easier to read.
-use Math::MatrixReal;
+use Math::MatrixReal 2.02;
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ Version 0.01
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 SYNOPSIS
 
@@ -145,7 +145,7 @@ sub shadows
     my $height = $self->{height};
 
     my $direction = _vector(_geodetic($self->{lat}, $self->{lon}, $self->{height}, $time)->eci);
-    $direction *= 1 / $direction->length(); # the matrix module has a slight problem with straight division.
+    $direction /= $direction->length();
 
     # first we check to see if the sun has risen over the base station.
     my ($azimuth, $elevation, $range) = $base->azel($sun, 1);
@@ -156,7 +156,7 @@ sub shadows
         # the umbra, but reflected around the plane of the terminator
         my $umbra_temp = _vector($sun->eci);
         my $umbraV = -$umbra_temp * ($earth_radius / ($sun->get('diameter') / 2));
-        my $umbraA = $umbra_temp * (1 / $umbra_temp->length());
+        my $umbraA = $umbra_temp / $umbra_temp->length();
         my $umbraΘ = PI/2 + _eci($umbraV, $time)->dip();
 
         my $baseV = _vector($base->eci);
