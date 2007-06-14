@@ -1,5 +1,6 @@
 package Astro::SpaceElevator;
 use utf8; # because I'm crazy
+use Data::Dumper;
 
 # This module handles all of the details of the ECI coordinate system,
 # which is a cartesian system with the origin at the earth's
@@ -8,6 +9,7 @@ use utf8; # because I'm crazy
 # the sun.
 use Astro::Coord::ECI;
 use Astro::Coord::ECI::Sun;
+use Astro::Coord::ECI::Moon;
 use Astro::Coord::ECI::Utils qw{PI rad2deg deg2rad};
 
 # this module lets me do vector and matrix math at a high level, which
@@ -20,18 +22,18 @@ Astro::SpaceElevator - Model a Space Elevator
 
 =head1 VERSION
 
-Version 0.01
+Version 0.04
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 =head1 SYNOPSIS
 
     use Astro::SpaceElevator;
 
     my $elevator = Astro::SpaceElevator->new(0, 120, 100_000, time());
-    print "The elevator leaves the Earth's shadow at " . ($elevator->shadows())[1] . "km above the base.\n";
+    print "The elevator leaves the Earth's shadow at " . ($elevator->shadows->{Earth}{penumbra})[1] . "km above the base.\n";
 
 =head1 METHODS
 
@@ -79,6 +81,7 @@ sub time
     {
         $self->{time} = $time;
         $self->{sun}  = Astro::Coord::ECI::Sun->universal($time);
+        $self->{moon} = Astro::Coord::ECI::Moon->universal($time);
         $self->{base} = _geodetic($self->{lat}, $self->{lon}, 0, $time);
     }
 
@@ -111,12 +114,61 @@ sub _vector
     return Math::MatrixReal->new_from_cols([[$x, $y, $z]]);
 }
 
+sub _normalize
+{
+    my $vec = shift;
+    return $vec / $vec->length;    
+}
+
 sub _between
 {
     my ($a, $x, $b) = @_;
     return $a if ($x < $a);
     return $x if ($a <= $x and $x <= $b);
     return $b if ($b < $x);
+}
+
+sub _clip
+{
+    my ($a, $x1, $x2, $b) = @_;
+    return if (($x1 < $a && $x2 < $a) || ($x1 > $b && $x2 > $b));
+    return [_between($a, $x1, $b), _between($a, $x2, $b)];
+}
+
+sub _mangle
+{
+    my ($a, $b, @intersection) = @_;
+    my $type = $intersection[0];
+
+    return [] if $type eq 'none';
+    return _clip($a, $intersection[-2], $intersection[-1], $b) if $type eq 'segment';
+    return [$a, $intersection[-2], $intersection[-1], $b] if $type eq 'invsegment';
+    return _clip($a, $intersection[-1], $b, $b) if $type eq 'ray';
+    return [(_between($a, $intersection[-1], $b)) x 2];
+}
+
+sub _merge
+{
+    my ($a, $b) = @_;
+    my @a = @{$a};
+    my @b = @{$b};
+    #return [@a, @b];
+
+    return $b unless @a;
+    return $a unless @b;
+
+    my @out;
+    if ($a[0] <= $b[0] && $b[0] <= $a[1])
+    {
+        push @out, $a[0];
+        push @out, $a[1] > $b[1] ? $a[1] : $b[1];
+    }
+    else
+    {
+        @out = (@a, @b);
+    }
+    
+    return \@out;
 }
 
 my $I = Math::MatrixReal->new_diag([1, 1, 1]);
@@ -134,43 +186,66 @@ Earth's umbral and penumbral shadows on the elevator.
 
 sub shadows
 {
-    my $self = shift;
+    my ($self, $include_lunar) = @_;
 
-    my $earth_diameter = 6372.797;
-    my $earth_radius = $earth_diameter / 2;
-
-    my $time = $self->{time};
-    my $sun = $self->{sun};
-    my $base = $self->{base};
+    my $time   = $self->{time};
+    my $sun    = $self->{sun};
+    my $moon   = $self->{moon};
+    my $base   = $self->{base};
     my $height = $self->{height};
 
-    my $direction = _vector(_geodetic($self->{lat}, $self->{lon}, $self->{height}, $time)->eci);
-    $direction /= $direction->length();
+    my $earth_radius = 3186.3985;
+    my $moon_radius = $moon->get('diameter') / 2;
+    my $sun_radius = $sun->get('diameter') / 2;
+
+    my $sunV = _vector($sun->eci);
+    my $moonV = _vector($moon->eci);
+
+    my $elev_direction = _normalize(_vector(_geodetic($self->{lat}, $self->{lon}, $self->{height}, $time)->eci));
+    my $baseV = _vector($base->eci);
+
+    my ($umbra, $penumbra);
+    my %data = (Earth => {},
+                Moon => {});
 
     # first we check to see if the sun has risen over the base station.
-    my ($azimuth, $elevation, $range) = $base->azel($sun, 1);
+    my (undef, $elevation, undef) = $base->azel($sun, 1);
     if ($elevation <= 0)
     {
-        # Figure out the dimensions of the umbra, which is a function of
-        # the Earth's distance from the sun. The penumbra is congruent to
-        # the umbra, but reflected around the plane of the terminator
-        my $umbra_temp = _vector($sun->eci);
-        my $umbraV = -$umbra_temp * ($earth_radius / ($sun->get('diameter') / 2));
-        my $umbraA = $umbra_temp / $umbra_temp->length();
+        # Figure out the dimensions of the umbra, which is a function
+        # of the Earth's distance from the sun. The penumbra is
+        # congruent to the umbra, but reflected around the plane of
+        # the terminator. In this case the math simplifies because the
+        # terminator goes through the orgin.
+        my $umbraV = -$sunV * ($earth_radius / $sun_radius);
+        my $umbraA = _normalize($sunV);
         my $umbraΘ = PI/2 + _eci($umbraV, $time)->dip();
 
-        my $baseV = _vector($base->eci);
-
-        my @umbra = _intersect($umbraV, $umbraA, $umbraΘ, $baseV, $direction);
-        my @penumbra = _intersect(-$umbraV, -$umbraA, $umbraΘ, $baseV, $direction);
-
-        return (_between(0, $umbra[-1], $height),
-                _between(0, $penumbra[-1], $height));
+        $data{Earth}{umbra} = _mangle(0, $height,
+                                      _intersect($umbraV, $umbraA, $umbraΘ,
+                                                 $baseV, $elev_direction));
+        $data{Earth}{penumbra} = _mangle(0, $height,
+                                         _intersect(-$umbraV, -$umbraA, $umbraΘ,
+                                                    $baseV, $elev_direction));
     }
-    else
+
+    if ($include_lunar)
     {
-        return (0, 0);
+        # Here the terminator is the Moon's of course.
+        my $umbra_temp = ($sunV - $moonV) * ($moon_radius / $sun_radius);
+        my $umbraV = -$umbra_temp + $moonV;
+        my $penumbraV = $umbra_temp + $moonV;
+        my $umbraΘ = PI/2 - atan2($umbraV->length, $moon_radius);
+
+        $data{Moon}{umbra} = _mangle(0, $height,
+                                     _intersect($umbraV, _normalize($umbra_temp), $umbraΘ,
+                                                $baseV, $elev_direction));
+        $data{Moon}{penumbra} = _mangle(0, $height,
+                                        _intersect($penumbraV, -_normalize($umbra_temp), $umbraΘ,
+                                                   $baseV, $elev_direction));
     }
+
+    return \%data;
 }
 
 sub _intersect
@@ -196,25 +271,31 @@ sub _intersect
     if ($c2 != 0)
     {
         my $δ = $c1**2 - $c0*$c2;
-        if ($δ > 0)
-        {
-            return ('segment',
-                    (-$c1 + sqrt($δ)) / $c2,
-                    (-$c1 - sqrt($δ)) / $c2);
-        }
-        elsif ($δ = 0)
-        {
-            return ('ray',
-                    -$c1 / $c2);
-        }
+
+        return ('none') if ($δ < 0);
+        return ('point', -$c1 / $c2) if ($δ == 0);
+
+        my $t1 = (-$c1 + sqrt($δ)) / $c2;
+        my $t2 = (-$c1 - sqrt($δ)) / $c2;
+
+        my $type = ((($P + $t1*$D) - $V) . $A == (($P + $t2*$D) - $V) . $A) ? 'segment' : 'invsegment';
+        return ($type, $t1, $t2) if ($δ > 0);
+    }
+    elsif ($c1 != 0)
+    {
+        my $Pi = $P - ($c0/(2 * $c1)) * $D;
+        return ('ray', ($P - $Pi)->length());
+    }
+    elsif ($c0 != 0)
+    {
+        return ('empty');
+    }
+    else
+    {
+        return ('ray', 0);
     }
 
-    # TODO: there are a few other cases that need to be included, but
-    # as I've modelled the elevator here, they can't occur. If a more
-    # detailed geometric model of the elevator is used to account for
-    # oscillation or other effects then they need to be filled in.
-
-    return ('none', 0);
+    return ('none');
 }
 
 =head1 AUTHOR
