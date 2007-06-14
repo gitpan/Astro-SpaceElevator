@@ -22,11 +22,11 @@ Astro::SpaceElevator - Model a Space Elevator
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 =head1 SYNOPSIS
 
@@ -120,6 +120,8 @@ sub _normalize
     return $vec / $vec->length;    
 }
 
+# the names of these next few functions are not necessarily the best
+# possible choices, but they're what I could come up with
 sub _between
 {
     my ($a, $x, $b) = @_;
@@ -147,28 +149,10 @@ sub _mangle
     return [(_between($a, $intersection[-1], $b)) x 2];
 }
 
-sub _merge
+sub _sign
 {
-    my ($a, $b) = @_;
-    my @a = @{$a};
-    my @b = @{$b};
-    #return [@a, @b];
-
-    return $b unless @a;
-    return $a unless @b;
-
-    my @out;
-    if ($a[0] <= $b[0] && $b[0] <= $a[1])
-    {
-        push @out, $a[0];
-        push @out, $a[1] > $b[1] ? $a[1] : $b[1];
-    }
-    else
-    {
-        @out = (@a, @b);
-    }
-    
-    return \@out;
+    return shift >= 0 ? 1
+                      : -1;
 }
 
 my $I = Math::MatrixReal->new_diag([1, 1, 1]);
@@ -177,8 +161,16 @@ my $I = Math::MatrixReal->new_diag([1, 1, 1]);
 
 =over
 
-Returns a two element list containing the height in kilometers of the
-Earth's umbral and penumbral shadows on the elevator.
+Returns a data structure giving the regions of the elevator that are in shadow, and which shadows are causing each region:
+
+    {'Earth' => {'penumbra' => [0, '2466.25270202392'],
+                 'umbra' => [0, '2309.7106914426']
+                },
+     'Moon' => {'penumbra' => [0, '66327.0611755147'],
+                'umbra' => ['12691.4616515026', '18869.3918401299']
+               }
+     'time' => bless([ … ], 'Class::Date'),
+    };
 
 =back
 
@@ -278,7 +270,10 @@ sub _intersect
         my $t1 = (-$c1 + sqrt($δ)) / $c2;
         my $t2 = (-$c1 - sqrt($δ)) / $c2;
 
-        my $type = ((($P + $t1*$D) - $V) . $A == (($P + $t2*$D) - $V) . $A) ? 'segment' : 'invsegment';
+        my $d1 = (($P + $t1*$D) - $V) . $A;
+        my $d2 = (($P + $t2*$D) - $V) . $A;
+
+        my $type = (_sign($d1) == _sign($d2)) ? 'segment' : 'invsegment';
         return ($type, $t1, $t2) if ($δ > 0);
     }
     elsif ($c1 != 0)
